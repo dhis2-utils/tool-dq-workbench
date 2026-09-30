@@ -1,7 +1,7 @@
 # Data Quality Workbench for DHIS2
 
 > ![Maturity: Validated](https://img.shields.io/badge/maturity-Validated-yellow)  
-> Intended use: monitoring metadata and data quality issues in DHIS2
+> Intended use: monitoring metadata and data quality issues in DHIS2. 
 > Maintainers: HISP Centre implementation team.
 
 A tool for monitoring data quality in DHIS2 by tracking validation rule violations,
