@@ -36,6 +36,7 @@ class OutlierAnalyzer(StageAnalyzer):
                 'destination_data_element': params['destination_data_element'],
                 'destination_dataset': params.get('destination_dataset'),
                 'lower_bound': params.get('lower_bound', 0)
+                # set 'replacement_method': True to call return_raw from _process_outlier_results()
             }
             #Optionally add date offsets if provided
             if 'start_date_offset' in params:
@@ -50,23 +51,24 @@ class OutlierAnalyzer(StageAnalyzer):
             ]
 
             results_nested = await asyncio.gather(*tasks, return_exceptions=True)
-            results = []
+            data_values = []
             errors = []
 
-            for i, result in enumerate(results_nested):
+            for i, data_value in enumerate(results_nested['data_values']):
                 ou = ous[i]
-                if isinstance(result, Exception):
-                    msg = f"Outlier detection failed for OU '{ou}': {str(result)}"
+                if isinstance(data_value, Exception):
+                    msg = f"Outlier detection failed for OU '{ou}': {str(data_value)}"
                     logging.error(msg)
                     errors.append(msg)
-                elif isinstance(result, list):
-                    results.extend(result)
+                elif isinstance(data_value, list):
+                    data_values.extend(data_value)
                 else:
-                    msg = f"Unexpected result type for OU '{ou}': {type(result)}"
+                    msg = f"Unexpected result type for OU '{ou}': {type(data_value)}"
                     logging.warning(msg)
                     errors.append(msg)
             return {
-                'dataValues': results,
+                'dataValues': data_values,
+                'rawOutliers': results_nested['raw_outliers'],
                 'errors': errors
             }
 
@@ -104,12 +106,12 @@ class OutlierAnalyzer(StageAnalyzer):
                     outlier_json = await response.json()
 
             return self._process_outlier_results(outlier_json, params['destination_data_element'],
-                                                 params['lower_bound'], params.get('destination_dataset'))
+                                                 params['lower_bound'], params.get('destination_dataset') , params.get('replacement_method', False))
 
         except Exception as e:
             return e
 
-    def _process_outlier_results(self, results, destination_data_element, lower_bound, destination_dataset=None):
+    def _process_outlier_results(self, results, destination_data_element, lower_bound, destination_dataset=None, return_raw: bool = False):
         outliers_by_ou_and_period = {}
 
         for outlier in results.get('outlierValues', []):
@@ -131,4 +133,10 @@ class OutlierAnalyzer(StageAnalyzer):
             for dv in data_values:
                 dv['_dataset'] = destination_dataset
 
-        return data_values
+        raw_outliers = [outlier for outlier in results.get('outlierValues', []) if
+                        float(outlier['value']) > lower_bound] if return_raw else []
+
+        return {
+            'data_values': data_values,
+            'raw_outliers': raw_outliers
+        }
