@@ -27,6 +27,15 @@
     </div>
 
     <div class="mb-3">
+        <label class="form-label" for="aggregation_level">Aggregation Level (optional)</label>
+        <input class="form-control" id="aggregation_level" name="aggregation_level" type="number"
+               value="{{ stage.params.aggregation_level or '' }}">
+        <div class="form-text">Sum violation counts onto each org unit's ancestor at this level (e.g. district)
+            instead of storing them at the org unit where they occur. Must be greater than or equal to the
+            org unit level.</div>
+    </div>
+
+    <div class="mb-3">
         <label class="form-label" for="duration">Duration (e.g. 12 months)</label>
         <input class="form-control" id="duration" name="duration" value="{{ stage.params.duration }}" required>
     </div>

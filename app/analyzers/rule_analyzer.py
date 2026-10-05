@@ -54,37 +54,70 @@ class ValidationRuleAnalyzer(StageAnalyzer):
         return data_values
     
 
+    def _data_value_key(self, dv):
+        return dv['dataElement'], dv['orgUnit'], dv['period'], dv.get('categoryOptionCombo', self.default_coc)
+
+    @staticmethod
+    def _same_value(a, b):
+        try:
+            return float(a) == float(b)
+        except (TypeError, ValueError):
+            return a == b
+
     def classify_data(self, existing_data_values, calculated_data_values):
-        existing_set = {
-            (dv['dataElement'], dv['orgUnit'], dv['period'], dv.get('categoryOptionCombo', self.default_coc))
-            for dv in existing_data_values
-        }
+        existing_by_key = {self._data_value_key(dv): dv for dv in existing_data_values}
+        calculated_by_key = {self._data_value_key(dv): dv for dv in calculated_data_values}
 
-        calculated_set = {
-            (dv['dataElement'], dv['orgUnit'], dv['period'], dv.get('categoryOptionCombo', self.default_coc))
-            for dv in calculated_data_values
-        }
+        # New keys, plus existing keys whose count changed (e.g. a school fixed one of two violations)
+        upsert_values = [
+            dv for key, dv in calculated_by_key.items()
+            if key not in existing_by_key or not self._same_value(existing_by_key[key].get('value'), dv.get('value'))
+        ]
+        delete_values = [dv for key, dv in existing_by_key.items() if key not in calculated_by_key]
 
-        to_delete = existing_set - calculated_set
-        upserts = calculated_set - existing_set
-
-        upsert_values = []
-        delete_values = []
-        #Filter the calculated set with the final upserts
-        for upsert in upserts:
-            for dv in calculated_data_values:
-                if (dv['dataElement'], dv['orgUnit'], dv['period'], dv.get('categoryOptionCombo', self.default_coc)) == upsert:
-                    upsert_values.append(dv)
-                    break
-        #Filter the existing set with the final deletions
-        for deletion in to_delete:
-            for dv in existing_data_values:
-                if (dv['dataElement'], dv['orgUnit'], dv['period'], dv.get('categoryOptionCombo', self.default_coc)) == deletion:
-                    delete_values.append(dv)
-                    break
         #Return the original length of data
         calculated_data_length = len(calculated_data_values)
         return upsert_values, delete_values, calculated_data_length
+
+    @staticmethod
+    def rollup_to_level(data_values, org_unit_paths, level):
+        """Sum data values onto each org unit's ancestor at the given hierarchy level.
+
+        Returns (rolled_up_values, skipped_values). Values whose org unit sits above the target level, or
+        whose path is unknown, cannot be rolled up and are returned as skipped.
+        """
+        totals = {}
+        templates = {}
+        skipped = []
+        for dv in data_values:
+            path = org_unit_paths.get(dv['orgUnit'])
+            ancestors = path.strip('/').split('/') if path else []
+            if len(ancestors) < level:
+                skipped.append(dv)
+                continue
+            key = (dv['dataElement'], ancestors[level - 1], dv['period'], dv.get('categoryOptionCombo'))
+            totals[key] = totals.get(key, 0) + int(dv['value'])
+            templates.setdefault(key, dv)
+
+        rolled_up = [
+            {**templates[key], 'orgUnit': key[1], 'value': str(total)}
+            for key, total in totals.items()
+        ]
+        return rolled_up, skipped
+
+    async def fetch_org_unit_paths(self, org_unit_ids, session, semaphore, chunk_size=100):
+        ids = sorted(set(org_unit_ids))
+        paths = {}
+        for i in range(0, len(ids), chunk_size):
+            chunk = ids[i:i + chunk_size]
+            url = (f"{self.base_url}/api/organisationUnits.json?filter=id:in:[{','.join(chunk)}]"
+                   f"&fields=id,path&paging=false")
+            async with semaphore:
+                async with session.get(url) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+            paths.update({ou['id']: ou['path'] for ou in data.get('organisationUnits', [])})
+        return paths
 
 
     async def _fetch_validation_rule_analysis_async(self, session, vrg, ou, start_date, data_element, max_results,
@@ -176,6 +209,17 @@ class ValidationRuleAnalyzer(StageAnalyzer):
                 results.extend(result)
             else:
                 msg = f"Unexpected result in validation rule analysis: {type(result)}"
+                logging.warning(msg)
+                errors.append(msg)
+
+        aggregation_level = params.get('aggregation_level')
+        if aggregation_level and results:
+            paths = await self.fetch_org_unit_paths([dv['orgUnit'] for dv in results], session, semaphore)
+            results, skipped = self.rollup_to_level(results, paths, aggregation_level)
+            logging.info(f"Rolled up violations to {len(results)} values at level {aggregation_level}")
+            if skipped:
+                msg = (f"Skipped {len(skipped)} violation counts in stage '{stage['name']}' for org units above "
+                       f"aggregation level {aggregation_level}: {sorted({dv['orgUnit'] for dv in skipped})}")
                 logging.warning(msg)
                 errors.append(msg)
 

@@ -82,6 +82,11 @@ def validation_rule_stage_view(stage_index=None):
         stage['params']['validation_rule_group'] = request.form['validation_rule_group']
         stage['params']['destination_data_element'] = request.form['destination_data_element']
         stage['params']['destination_dataset'] = request.form.get('destination_dataset') or None
+        aggregation_level = request.form.get('aggregation_level', '').strip()
+        if aggregation_level:
+            stage['params']['aggregation_level'] = int(aggregation_level)
+        else:
+            stage['params'].pop('aggregation_level', None)
         stage['uid'] = request.form.get('uid', '').strip() or UidUtils.generate_uid()
         stage['active'] = request.form.get('active', 'off') == 'on'
 
