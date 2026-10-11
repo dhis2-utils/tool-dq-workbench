@@ -13,6 +13,8 @@ from app.analyzers.rule_analyzer import ValidationRuleAnalyzer
 from app.core.config_loader import ConfigManager
 from app.core.api_utils import Dhis2ApiUtils
 
+from app.core.org_unit_filter import filter_and_fetch_closed_org_units
+
 
 def _format_duration(delta) -> str:
     total = delta.total_seconds()
@@ -120,6 +122,17 @@ class DataQualityMonitor:
                 msg = f"Unexpected result type from stage '{name}': {type(result)}"
                 logging.warning(msg)
                 errors.append(msg)
+
+        if upserts:
+            upserts, dropped_closed = await filter_and_fetch_closed_org_units(
+                self.api_utils, upserts, session
+            )
+            if dropped_closed:
+                logging.warning(f"Skipping {len(dropped_closed)} data value(s) for closed org units")
+                errors.extend(
+                    f"Skipped (org unit closed): {dv['orgUnit']}/{dv['period']}"
+                    for dv in dropped_closed
+                )
 
         import_summary = None
         delete_import_summary = None

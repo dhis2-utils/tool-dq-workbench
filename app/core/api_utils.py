@@ -71,6 +71,34 @@ class Dhis2ApiUtils:
                 data = await response.json()
                 return [ou['id'] for ou in data['organisationUnits']]
 
+    async def get_organisation_unit_dates_bulk(self, org_unit_ids, session, chunk_size=200):
+        """
+        Fetch the openingDate and closedDate for a batch of org units.
+
+        Splits into multiple requests if org_unit_ids is large, since DHIS2's
+        filter query string has a practical length limit.
+
+        Returns a dict keyed by org_unit_id as follows:
+        {
+            'DiszpKrYNg8': {'openingDate': '2003-01-01', 'closedDate': None},
+            'BoskqZsekw8': {'openingDate': '2015-06-16', 'closedDate': '2024-03-01'},
+        }
+        """
+        org_unit_ids = list(org_unit_ids)
+        all_dates = {}
+
+        for i in range(0, len(org_unit_ids), chunk_size):
+            chunk = org_unit_ids[i:i + chunk_size]
+            ids_filter = ','.join(chunk)
+            url = (f'{self.base_url}/api/organisationUnits.json'
+                   f'?filter=id:in:[{ids_filter}]&fields=id,openingDate,closedDate&paging=false')
+            async with session.get(url) as response:
+                response.raise_for_status()
+                data = await response.json()
+                all_dates.update({ou['id']: ou for ou in data['organisationUnits']})
+
+        return all_dates
+
     async def fetch_datavalue_sets(self, query_params, session):
         url = f'{self.base_url}/api/dataValueSets.json'
         async with session.get(url, params=query_params) as response:
