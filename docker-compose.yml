@@ -3,7 +3,7 @@ services:
   # CLI runner — the primary production workload.
   # Run once manually or from cron: docker compose run --rm cli
   cli:
-    image: ghcr.io/dhis2/tool-dq-workbench:latest
+    image: ghcr.io/dhis2-utils/tool-dq-workbench:latest
     volumes:
       - ./config:/app/config:ro
     environment:
@@ -17,7 +17,7 @@ services:
   # WARNING: The web UI has no built-in authentication. Only run it on
   # localhost or a trusted network, and stop it when you are finished.
   web:
-    image: ghcr.io/dhis2/tool-dq-workbench:latest
+    image: ghcr.io/dhis2-utils/tool-dq-workbench:latest
     ports:
       - "127.0.0.1:5001:5000"
     volumes:

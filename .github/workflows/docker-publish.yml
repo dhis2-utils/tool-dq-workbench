@@ -32,7 +32,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/dhis2/tool-dq-workbench
+          images: ghcr.io/dhis2-utils/tool-dq-workbench
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

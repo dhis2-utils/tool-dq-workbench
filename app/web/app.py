@@ -201,7 +201,7 @@ def _check_for_updates():
             import requests
             current = pkg_version('tool-dq-workbench')
             resp = requests.get(
-                'https://api.github.com/repos/dhis2/tool-dq-workbench/releases/latest',
+                'https://api.github.com/repos/dhis2-utils/tool-dq-workbench/releases/latest',
                 timeout=5,
                 headers={'Accept': 'application/vnd.github.v3+json'},
             )
@@ -218,7 +218,7 @@ def _check_for_updates():
             if _parse(latest_tag) > _parse(current):
                 logging.warning(
                     f"A newer version (v{latest_tag}) is available. "
-                    "Visit https://github.com/dhis2/tool-dq-workbench/releases to update."
+                    "Visit https://github.com/dhis2-utils/tool-dq-workbench/releases to update."
                 )
         except Exception:
             pass  # Never crash the app over a version check

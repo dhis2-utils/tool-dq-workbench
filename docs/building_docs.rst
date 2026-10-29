@@ -2,7 +2,7 @@
 Building the documentation
 ==========================
 
-The latest documentation is published at https://dhis2.github.io/tool-dq-workbench/
+The latest documentation is published at https://dhis2-utils.github.io/tool-dq-workbench/
 and is automatically updated on every push to ``main``.
 
 The documentation is built using Sphinx.

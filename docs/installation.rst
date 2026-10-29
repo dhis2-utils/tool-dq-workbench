@@ -36,7 +36,7 @@ the repository first:
 
 .. code-block:: bash
 
-   git clone https://github.com/dhis2/tool-dq-workbench.git
+   git clone https://github.com/dhis2-utils/tool-dq-workbench.git
    cd tool-dq-workbench
 
 
@@ -55,7 +55,7 @@ Download
 ^^^^^^^^
 
 Download the latest installer from the
-`GitHub Releases page <https://github.com/dhis2/tool-dq-workbench/releases/latest>`_:
+`GitHub Releases page <https://github.com/dhis2-utils/tool-dq-workbench/releases/latest>`_:
 
 .. code-block:: text
 
@@ -146,7 +146,7 @@ This is the primary use case.  One command is all you need:
      -e DHIS2_BASE_URL=https://your-dhis2-instance.org \
      -e DHIS2_API_TOKEN=d2p_your_token_here \
      -v $(pwd)/config:/app/config \
-     ghcr.io/dhis2/tool-dq-workbench:latest
+     ghcr.io/dhis2-utils/tool-dq-workbench:latest
 
 The web UI will be available at ``http://localhost:5001``.
 
@@ -177,7 +177,7 @@ container refers to itself — not your host machine.  Use
      -e DHIS2_BASE_URL=http://host.docker.internal:8080 \
      -e DHIS2_API_TOKEN=d2p_your_token_here \
      -v $(pwd)/config:/app/config \
-     ghcr.io/dhis2/tool-dq-workbench:latest
+     ghcr.io/dhis2-utils/tool-dq-workbench:latest
 
 .. note::
 
@@ -196,7 +196,7 @@ reach ``localhost`` directly:
      -e DHIS2_BASE_URL=http://localhost:8080 \
      -e DHIS2_API_TOKEN=d2p_your_token_here \
      -v $(pwd)/config:/app/config \
-     ghcr.io/dhis2/tool-dq-workbench:latest
+     ghcr.io/dhis2-utils/tool-dq-workbench:latest
 
 The web UI will be available at ``http://localhost:5000``.
 
@@ -224,7 +224,7 @@ a stable key:
      -e DHIS2_API_TOKEN=d2p_your_token_here \
      -e FLASK_SECRET_KEY \
      -v $(pwd)/config:/app/config \
-     ghcr.io/dhis2/tool-dq-workbench:latest
+     ghcr.io/dhis2-utils/tool-dq-workbench:latest
 
 Using Docker Compose (advanced)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

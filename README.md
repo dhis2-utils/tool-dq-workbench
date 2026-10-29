@@ -16,7 +16,7 @@ in DHIS2 data elements, making them available for analysis in maps, charts, and 
 The easiest option for Windows users — no Python, Docker, or command line required.
 
 Download `dq-workbench-X.Y.Z-windows-setup.exe` from the
-[latest release](https://github.com/dhis2/tool-dq-workbench/releases/latest),
+[latest release](https://github.com/dhis2-utils/tool-dq-workbench/releases/latest),
 run the installer, and launch the app from the Start Menu. The browser opens
 automatically and you are taken straight to the server setup page on first run.
 
@@ -32,7 +32,7 @@ Docker works on Linux, macOS, and Windows (via WSL2). No Python installation req
 ```bash
 docker run --rm -p 127.0.0.1:5001:5000 \
   -v $(pwd)/config:/app/config \
-  ghcr.io/dhis2/tool-dq-workbench:latest
+  ghcr.io/dhis2-utils/tool-dq-workbench:latest
 ```
 
 Open http://localhost:5001 — you will be taken straight to the server setup page.
@@ -45,7 +45,7 @@ docker run --rm -p 127.0.0.1:5001:5000 \
   -e DHIS2_BASE_URL=https://your-dhis2-instance.org \
   -e DHIS2_API_TOKEN=d2p_your_token_here \
   -v $(pwd)/config:/app/config \
-  ghcr.io/dhis2/tool-dq-workbench:latest
+  ghcr.io/dhis2-utils/tool-dq-workbench:latest
 ```
 
 **Local DHIS2 (also running in Docker):**
@@ -56,7 +56,7 @@ docker run --rm -p 127.0.0.1:5001:5000 \
   -e DHIS2_BASE_URL=http://host.docker.internal:8080 \
   -e DHIS2_API_TOKEN=d2p_your_token_here \
   -v $(pwd)/config:/app/config \
-  ghcr.io/dhis2/tool-dq-workbench:latest
+  ghcr.io/dhis2-utils/tool-dq-workbench:latest
 ```
 
 > **macOS/Windows:** `--add-host` is not needed — `host.docker.internal` works out of the box.
@@ -68,7 +68,7 @@ docker run --rm --network host \
   -e DHIS2_BASE_URL=http://localhost:8080 \
   -e DHIS2_API_TOKEN=d2p_your_token_here \
   -v $(pwd)/config:/app/config \
-  ghcr.io/dhis2/tool-dq-workbench:latest
+  ghcr.io/dhis2-utils/tool-dq-workbench:latest
 ```
 
 The web UI will be available at http://localhost:5000 when using `--network host`.
@@ -94,7 +94,7 @@ A typical workflow:
 Once you have a `config.yml`, run the CLI directly (recommended for scheduled use):
 
 ```bash
-pip install git+https://github.com/dhis2/tool-dq-workbench.git
+pip install git+https://github.com/dhis2-utils/tool-dq-workbench.git
 dq-monitor --config config/my_config.yml
 ```
 
@@ -106,7 +106,7 @@ docker compose run --rm cli
 
 ## Documentation
 
-Full documentation is published at **https://dhis2.github.io/tool-dq-workbench/**.
+Full documentation is published at **https://dhis2-utils.github.io/tool-dq-workbench/**.
 
 To build it locally:
 
