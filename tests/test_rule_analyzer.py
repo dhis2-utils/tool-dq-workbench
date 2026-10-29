@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -246,3 +247,99 @@ def test_count_mapped_violations_skips_rows_without_rule_id():
     rows = [{'organisationUnitId': 'ou1', 'periodId': 'p1'}, _row('r1', 'ou1', 'p1')]
     values = _analyzer().count_mapped_violations(rows, [{'validation_rule': 'r1', 'data_element': 'deA'}])
     assert [(v['dataElement'], v['value']) for v in values] == [('deA', '1')]
+
+
+def _rules_stage(rule_count, data_elements=('deA',), **params):
+    mappings = [{'validation_rule': f'rule{i:07d}', 'data_element': data_elements[i % len(data_elements)]}
+                for i in range(rule_count)]
+    return _mapping_stage(mappings, **params)
+
+
+def _run_stage(stage, responder, existing=(), org_units=('ou1', 'ou2')):
+    analyzer = _analyzer()
+    analyzer.get_organisation_units_at_level = AsyncMock(return_value=list(org_units))
+    analyzer.fetch_existing_datvalues = AsyncMock(return_value=list(existing))
+    session = _FakeSession(responder)
+
+    async def run():
+        return await analyzer.run_stage(stage, session, asyncio.Semaphore(5))
+    return asyncio.run(run()), session
+
+
+def test_destination_data_elements_for_both_forms():
+    assert ValidationRuleAnalyzer.destination_data_elements({'destination_data_element': DE}) == [DE]
+    assert ValidationRuleAnalyzer.destination_data_elements({'rule_mappings': [
+        {'validation_rule': 'r1', 'data_element': 'deB'}, {'validation_rule': 'r2', 'data_element': 'deA'},
+        {'validation_rule': 'r3', 'data_element': 'deB'}]}) == ['deA', 'deB']
+
+
+def test_existing_value_urls_repeat_data_element_param_in_chunks():
+    stage = _rules_stage(60, data_elements=tuple(f'de{i:09d}' for i in range(60)))
+    stage['organisation_unit'] = ['ou1']
+
+    async def run():
+        return await _analyzer().data_values_urls_for_orgunits(stage, None, asyncio.Semaphore(5))
+    urls = asyncio.run(run())
+
+    assert len(urls) == 2
+    assert urls[0].count('dataElement=') == 50 and urls[1].count('dataElement=') == 10
+    assert all('orgUnit=ou1' in url and 'children=true' in url for url in urls)
+
+
+def test_run_stage_mapping_form_batches_per_org_unit():
+    result, session = _run_stage(_rules_stage(120), lambda body: (200, [_row(body['vr'][0], body['ou'], 'p1')]))
+
+    assert len(session.bodies) == 6
+    assert all('vr' in b and 'vrg' not in b for b in session.bodies)
+    assert sorted((dv['orgUnit'], dv['value']) for dv in result['dataValues']) == [('ou1', '3'), ('ou2', '3')]
+    assert result['errors'] == []
+
+
+def test_run_stage_group_form_unchanged():
+    result, session = _run_stage(_vr_stage(), lambda body: (200, [_row('r1', body['ou'], 'p1'),
+                                                                 _row('r2', body['ou'], 'p1')]))
+
+    assert [b['vrg'] for b in session.bodies] == ['vrg00000001', 'vrg00000001']
+    assert all('vr' not in b for b in session.bodies)
+    assert sorted((dv['dataElement'], dv['orgUnit'], dv['value']) for dv in result['dataValues']) == [
+        (DE, 'ou1', '2'), (DE, 'ou2', '2')]
+
+
+def _existing(data_element, ou, period, value):
+    return {'dataElement': data_element, 'orgUnit': ou, 'period': period,
+            'categoryOptionCombo': COC, 'value': str(value)}
+
+
+def test_run_stage_skips_deletions_when_a_request_fails():
+    def responder(body):
+        if body['ou'] == 'ou2':
+            return 500, {'message': 'boom'}
+        return 200, [_row('rule0000000', 'ou1', 'p1')]
+
+    result, _ = _run_stage(_rules_stage(1), responder, existing=[_existing('deA', 'ou2', 'p1', 4)])
+
+    assert result['deletions'] == []
+    assert any('Skipped deletions' in e for e in result['errors'])
+    assert [(dv['orgUnit'], dv['value']) for dv in result['dataValues']] == [('ou1', '1')]
+
+
+@pytest.mark.parametrize('returned', [500, 758])
+def test_run_stage_flags_truncation_when_results_reach_or_exceed_max_results(returned):
+    def responder(body):
+        rows = [_row('rule0000000', body['ou'], f'p{i}') for i in range(returned)] if body['ou'] == 'ou1' else []
+        return 200, rows
+
+    result, _ = _run_stage(_rules_stage(1, max_results=500), responder,
+                           existing=[_existing('deA', 'ou2', 'p1', 1)])
+
+    assert any('truncated' in e for e in result['errors'])
+    assert result['deletions'] == []
+
+
+def test_run_stage_deletes_vanished_values_when_complete():
+    result, _ = _run_stage(_rules_stage(1), lambda body: (200, [_row('rule0000000', 'ou1', 'p1')]
+                                                           if body['ou'] == 'ou1' else []),
+                           existing=[_existing('deA', 'ou2', 'p1', 2)])
+
+    assert [(dv['dataElement'], dv['orgUnit']) for dv in result['deletions']] == [('deA', 'ou2')]
+    assert result['errors'] == []

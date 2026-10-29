@@ -9,11 +9,17 @@ class ValidationRuleAnalyzer(StageAnalyzer):
     def __init__(self, config, base_url, headers):
         super().__init__(config, base_url, headers)
         
-    async def data_values_urls_for_orgunits(self,stage,session, semaphore):
+    @staticmethod
+    def destination_data_elements(params):
+        if 'rule_mappings' in params:
+            return sorted({mapping['data_element'] for mapping in params['rule_mappings']})
+        return [params['destination_data_element']]
+
+    async def data_values_urls_for_orgunits(self,stage,session, semaphore, chunk_size=50):
         urls = []
         start_date = self.get_start_date(stage)
         params = stage['params']
-        data_element = params['destination_data_element']
+        data_elements = self.destination_data_elements(params)
 
         organisation_unit = stage.get('organisation_unit')
         if isinstance(organisation_unit, list):
@@ -21,17 +27,16 @@ class ValidationRuleAnalyzer(StageAnalyzer):
         else:
             ous = await self.get_organisation_units_at_level(params['level'], session, semaphore)
 
-        params = {
-            'dataElement': data_element,
+        query = {
             'startDate': start_date.strftime('%Y-%m-%d'),
             'endDate': datetime.now().strftime('%Y-%m-%d'),
             'children': 'true'}
-        
+
         for ou in ous:
-            params['orgUnit'] = ou
-            query_string = '&'.join(f"{key}={value}" for key, value in params.items())
-            url = f"{self.base_url}/api/dataValueSets.json?{query_string}"
-            urls.append(url)
+            for i in range(0, len(data_elements), chunk_size):
+                de_params = '&'.join(f"dataElement={de}" for de in data_elements[i:i + chunk_size])
+                query_string = '&'.join(f"{key}={value}" for key, value in {**query, 'orgUnit': ou}.items())
+                urls.append(f"{self.base_url}/api/dataValueSets.json?{de_params}&{query_string}")
         return urls
 
     async def fetch_existing_datvalues(self,stage, session, semaphore):
@@ -223,9 +228,8 @@ class ValidationRuleAnalyzer(StageAnalyzer):
 
         start_date = self.get_start_date(stage)
         params = stage['params']
-        vrg = params['validation_rule_group']
         max_results = params.get('max_results', self.config['server'].get('max_results', 500))
-        data_element = params['destination_data_element']
+        rule_mappings = params.get('rule_mappings')
 
         organisation_unit = stage.get('organisation_unit')
         ous = []
@@ -234,27 +238,45 @@ class ValidationRuleAnalyzer(StageAnalyzer):
         else:
             ous = await self.get_organisation_units_at_level(params['level'], session, semaphore)
 
-        tasks = [
-            self._fetch_validation_rule_analysis_async(
-                session, ou, start_date, max_results, semaphore, vrg=vrg
-            )
-            for ou in ous
-        ]
+        if rule_mappings:
+            selections = [{'vr': batch} for batch in self.rule_batches(m['validation_rule'] for m in rule_mappings)]
+        else:
+            selections = [{'vrg': params['validation_rule_group']}]
 
-        results_nested = await asyncio.gather(*tasks)
-        results = []
+        analysis_requests = [(ou, selection) for ou in ous for selection in selections]
+        results_nested = await asyncio.gather(*[
+            self._fetch_validation_rule_analysis_async(session, ou, start_date, max_results, semaphore, **selection)
+            for ou, selection in analysis_requests
+        ])
+        rows = []
         errors = []
+        incomplete = False
 
-        for result in results_nested:
+        for (ou, _), result in zip(analysis_requests, results_nested):
             if isinstance(result, Exception):
                 logging.error(f"Validation rule analysis failed: {result}")
                 errors.append(str(result))
-            elif isinstance(result, list):
-                results.extend(self.count_group_violations(result, data_element))
-            else:
+                incomplete = True
+                continue
+            if not isinstance(result, list):
                 msg = f"Unexpected result in validation rule analysis: {type(result)}"
                 logging.warning(msg)
                 errors.append(msg)
+                incomplete = True
+                continue
+            if len(result) >= max_results:
+                msg = (f"Validation rule violations for org unit '{ou}' may be truncated: {len(result)} results "
+                       f"with max_results {max_results}. Increase max_results or use a deeper org unit level.")
+                logging.error(msg)
+                errors.append(msg)
+                incomplete = True
+            rows.extend(result)
+
+        # Count once over all requests: one data element can be fed by rules from several batches
+        if rule_mappings:
+            results = self.count_mapped_violations(rows, rule_mappings)
+        else:
+            results = self.count_group_violations(rows, params['destination_data_element'])
 
         aggregation_level = params.get('aggregation_level')
         if aggregation_level and results:
@@ -274,6 +296,12 @@ class ValidationRuleAnalyzer(StageAnalyzer):
 
         existing_data_values = await self.fetch_existing_datvalues(stage, session, semaphore)
         upserts, deletions, calculated_data_length = self.classify_data(existing_data_values, results)
+        if incomplete and deletions:
+            msg = (f"Skipped deletions of {len(deletions)} values in stage '{stage['name']}' because the "
+                   f"validation rule analysis was incomplete")
+            logging.warning(msg)
+            errors.append(msg)
+            deletions = []
 
         return {
             'dataValues': upserts,
