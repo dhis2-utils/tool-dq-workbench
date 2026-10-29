@@ -1,3 +1,6 @@
+import asyncio
+from datetime import date
+
 import pytest
 
 from app.analyzers.rule_analyzer import ValidationRuleAnalyzer
@@ -147,3 +150,99 @@ def test_config_still_requires_group_and_data_element_without_rule_mappings():
     del stage['params']['destination_data_element']
     with pytest.raises(ValueError, match='destination_data_element'):
         _config_manager()._validate_stage_params(stage)
+
+
+class _FakeResponse:
+    def __init__(self, status, body):
+        self.status, self._body, self.url = status, body, 'fake'
+
+    async def json(self):
+        return self._body
+
+    async def text(self):
+        return str(self._body)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeSession:
+    """Records POST bodies; `responder(body) -> (status, json)` decides the reply."""
+
+    def __init__(self, responder):
+        self.responder, self.bodies = responder, []
+
+    def post(self, url, json):
+        self.bodies.append(json)
+        return _FakeResponse(*self.responder(json))
+
+
+def _row(rule, ou, period):
+    return {'validationRuleId': rule, 'organisationUnitId': ou, 'periodId': period}
+
+
+def _run_fetch(session, **kwargs):
+    async def run():
+        return await _analyzer()._fetch_validation_rule_analysis_async(
+            session, 'ou1', date(2026, 1, 1), 500, asyncio.Semaphore(5), **kwargs)
+    return asyncio.run(run())
+
+
+def test_rule_batches_dedupes_and_sorts():
+    assert ValidationRuleAnalyzer.rule_batches(['b', 'a', 'b', 'c'], size=2) == [['a', 'b'], ['c']]
+
+
+def test_rule_batches_default_size_is_50():
+    batches = ValidationRuleAnalyzer.rule_batches([f'rule{i:07d}' for i in range(120)])
+    assert [len(b) for b in batches] == [50, 50, 20]
+
+
+def test_fetch_sends_vr_without_vrg():
+    session = _FakeSession(lambda body: (200, [_row('r1', 'ou1', '202607')]))
+    rows = _run_fetch(session, vr=['r1', 'r2'])
+    assert rows == [_row('r1', 'ou1', '202607')]
+    assert session.bodies[0]['vr'] == ['r1', 'r2'] and 'vrg' not in session.bodies[0]
+
+
+def test_fetch_sends_vrg_without_vr():
+    session = _FakeSession(lambda body: (200, []))
+    _run_fetch(session, vrg='vrg00000001')
+    assert session.bodies[0]['vrg'] == 'vrg00000001' and 'vr' not in session.bodies[0]
+
+
+def test_fetch_rejects_rows_for_unrequested_rules():
+    session = _FakeSession(lambda body: (200, [_row('r1', 'ou1', 'p'), _row('other', 'ou1', 'p')]))
+    result = _run_fetch(session, vr=['r1'])
+    assert isinstance(result, Exception) and "does not support 'vr'" in str(result)
+
+
+def test_fetch_returns_exception_on_http_error():
+    result = _run_fetch(_FakeSession(lambda body: (404, {'message': 'Validation rules not found: x'})), vr=['x'])
+    assert isinstance(result, Exception) and '404' in str(result)
+
+
+def test_count_group_violations_counts_per_org_unit_and_period():
+    rows = [_row('r1', 'ou1', 'p1'), _row('r2', 'ou1', 'p1'), _row('r1', 'ou2', 'p1')]
+    values = _analyzer().count_group_violations(rows, DE)
+    assert sorted((v['orgUnit'], v['value']) for v in values) == [('ou1', '2'), ('ou2', '1')]
+    assert all(v['dataElement'] == DE and v['period'] == 'p1' for v in values)
+
+
+def test_count_mapped_violations_sums_many_to_one_and_fans_out_one_to_many():
+    mappings = [{'validation_rule': 'r1', 'data_element': 'deA'},
+                {'validation_rule': 'r2', 'data_element': 'deA'},
+                {'validation_rule': 'r1', 'data_element': 'deB'}]
+    rows = [_row('r1', 'ou1', 'p1'), _row('r2', 'ou1', 'p1'), _row('r3', 'ou1', 'p1')]
+    values = _analyzer().count_mapped_violations(rows, mappings)
+    assert sorted((v['dataElement'], v['orgUnit'], v['value']) for v in values) == [
+        ('deA', 'ou1', '2'), ('deB', 'ou1', '1')]
+    assert all(v['categoryOptionCombo'] == COC for v in values)
+
+
+def test_count_mapped_violations_skips_rows_without_rule_id():
+    rows = [{'organisationUnitId': 'ou1', 'periodId': 'p1'}, _row('r1', 'ou1', 'p1')]
+    values = _analyzer().count_mapped_violations(rows, [{'validation_rule': 'r1', 'data_element': 'deA'}])
+    assert [(v['dataElement'], v['value']) for v in values] == [('deA', '1')]

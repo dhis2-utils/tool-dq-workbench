@@ -4,6 +4,8 @@ from datetime import datetime
 from app.analyzers.stage_analyzer import StageAnalyzer
 
 class ValidationRuleAnalyzer(StageAnalyzer):
+    MAX_RULES_PER_REQUEST = 50
+
     def __init__(self, config, base_url, headers):
         super().__init__(config, base_url, headers)
         
@@ -120,8 +122,19 @@ class ValidationRuleAnalyzer(StageAnalyzer):
         return paths
 
 
-    async def _fetch_validation_rule_analysis_async(self, session, vrg, ou, start_date, data_element, max_results,
-                                                    semaphore):
+    @staticmethod
+    def rule_batches(rule_ids, size=None):
+        """Split distinct rule UIDs (sorted) into batches the analysis API accepts in one 'vr' request."""
+        size = size or ValidationRuleAnalyzer.MAX_RULES_PER_REQUEST
+        ids = sorted(set(rule_ids))
+        return [ids[i:i + size] for i in range(0, len(ids), size)]
+
+    async def _fetch_validation_rule_analysis_async(self, session, ou, start_date, max_results, semaphore,
+                                                    vrg=None, vr=None):
+        """Run validation rule analysis for one org unit and return the raw result rows.
+
+        Rules are selected by group (vrg) or by a list of rule UIDs (vr). Errors are returned, not raised.
+        """
         url = f'{self.base_url}/api/dataAnalysis/validationRules'
         body = {
             'notification': False,
@@ -129,13 +142,17 @@ class ValidationRuleAnalyzer(StageAnalyzer):
             'ou': ou,
             'startDate': start_date.strftime('%Y-%m-%d'),
             'endDate': datetime.now().strftime('%Y-%m-%d'),
-            'vrg': vrg,
             'maxResults': max_results
         }
+        if vr is not None:
+            body['vr'] = vr
+        else:
+            body['vrg'] = vrg
 
         try:
             async with semaphore:
-                logging.debug("Running validation rule analysis for ou '%s' and vrg '%s'", ou, vrg)
+                logging.debug("Running validation rule analysis for ou '%s' with %s", ou,
+                              f"{len(vr)} rules" if vr is not None else f"vrg '{vrg}'")
                 logging.debug("Making POST request to URL: %s", url)
                 logging.debug("Request body: %s", body)
                 async with session.post(url, json=body) as response:
@@ -151,27 +168,54 @@ class ValidationRuleAnalyzer(StageAnalyzer):
             logging.warning(f"Expected list from DHIS2 validation API but got {type(response_data)}: {response_data}")
             return []
 
-        violations = {}
-        for result in response_data:
-            if 'organisationUnitId' not in result or 'periodId' not in result:
-                logging.warning(f"Skipping malformed result: {result}")
-                continue
+        if vr is not None:
+            # A server without 'vr' support ignores it and evaluates every rule in the system
+            unexpected = {row.get('validationRuleId') for row in response_data} - set(vr)
+            if unexpected:
+                return RuntimeError(
+                    f"Server returned results for rules not requested ({len(unexpected)} rules) for ou '{ou}' — "
+                    f"it does not support 'vr' (requires DHIS2-22371)")
 
-            key = (result['organisationUnitId'], result['periodId'])
-            violations[key] = violations.get(key, 0) + 1
+        return response_data
 
-        #Warn if the number of violations is exactly equal to the max_results
-        if max_results == len(response_data):
-            msg = "Validation rule violations may be truncated. Consider to increase max_results"
-            logging.error(msg)
-
+    def _violation_values(self, counts):
         return [{
             'dataElement': data_element,
             'orgUnit': ou_id,
             'period': period_id,
             'categoryOptionCombo': self.default_coc,
             'value': str(count)
-        } for (ou_id, period_id), count in violations.items()]
+        } for (data_element, ou_id, period_id), count in counts.items()]
+
+    @staticmethod
+    def _well_formed(row, keys):
+        if all(row.get(key) for key in keys):
+            return True
+        logging.warning(f"Skipping malformed result: {row}")
+        return False
+
+    def count_group_violations(self, rows, data_element):
+        counts = {}
+        for row in rows:
+            if not self._well_formed(row, ('organisationUnitId', 'periodId')):
+                continue
+            key = (data_element, row['organisationUnitId'], row['periodId'])
+            counts[key] = counts.get(key, 0) + 1
+        return self._violation_values(counts)
+
+    def count_mapped_violations(self, rows, rule_mappings):
+        data_elements_by_rule = {}
+        for mapping in rule_mappings:
+            data_elements_by_rule.setdefault(mapping['validation_rule'], []).append(mapping['data_element'])
+
+        counts = {}
+        for row in rows:
+            if not self._well_formed(row, ('validationRuleId', 'organisationUnitId', 'periodId')):
+                continue
+            for data_element in data_elements_by_rule.get(row['validationRuleId'], []):
+                key = (data_element, row['organisationUnitId'], row['periodId'])
+                counts[key] = counts.get(key, 0) + 1
+        return self._violation_values(counts)
     
 
     async def run_stage(self, stage, session, semaphore):
@@ -192,7 +236,7 @@ class ValidationRuleAnalyzer(StageAnalyzer):
 
         tasks = [
             self._fetch_validation_rule_analysis_async(
-                session, vrg, ou, start_date, data_element, max_results, semaphore
+                session, ou, start_date, max_results, semaphore, vrg=vrg
             )
             for ou in ous
         ]
@@ -206,7 +250,7 @@ class ValidationRuleAnalyzer(StageAnalyzer):
                 logging.error(f"Validation rule analysis failed: {result}")
                 errors.append(str(result))
             elif isinstance(result, list):
-                results.extend(result)
+                results.extend(self.count_group_violations(result, data_element))
             else:
                 msg = f"Unexpected result in validation rule analysis: {type(result)}"
                 logging.warning(msg)
