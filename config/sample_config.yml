@@ -6,3 +6,15 @@ server:
   max_results: 500
   min_max_bulk_api_disabled: false
   # root_org_unit: ImspTQPwCqd  # required only if your instance has multiple top-level org units
+# analyzer_stages:
+#   # Per-rule violation counts (requires a DHIS2 build supporting 'vr' in validation analysis)
+#   - name: Per-rule violation counts
+#     type: validation_rules
+#     active: true
+#     params:
+#       level: 2
+#       duration: 12 months
+#       destination_dataset: <dataset uid>
+#       rule_mappings:
+#         - validation_rule: <validation rule uid>
+#           data_element: <data element uid>
