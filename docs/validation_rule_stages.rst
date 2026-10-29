@@ -72,3 +72,46 @@ rule groups, and not mix data elements which are collected in different period t
    Whether the validation rule stage is active or not. If the validation
    rule stage is not active, it will be excluded when running the
    validation rule analysis with the command line script.
+
+Counting individual validation rules
+------------------------------------
+
+Instead of a validation rule group, a stage can map individual validation
+rules onto data elements with ``rule_mappings``. This is useful when you need
+a count per rule, without creating a validation rule group for every rule.
+Rule mappings can currently only be configured in the YAML configuration
+file; the web form does not edit them.
+
+.. code-block:: yaml
+
+   - name: HMIS per-rule counts
+     type: validation_rules
+     params:
+       destination_dataset: YJmdEDTe6Em
+       duration: 12 months
+       level: 2
+       rule_mappings:
+         - validation_rule: DjYp4akRsCn
+           data_element: aaaaaaaaaaa
+         - validation_rule: KEncIyxziLd
+           data_element: aaaaaaaaaaa
+         - validation_rule: KEncIyxziLd
+           data_element: bbbbbbbbbbb
+
+A stage uses either ``rule_mappings`` or ``validation_rule_group`` with
+``destination_data_element``, never both. Each entry pairs one validation
+rule with one data element:
+
+- Several rules mapped to the same data element are summed, so the data
+  element holds the violations of all those rules, like an ad-hoc group.
+- A rule mapped to several data elements is counted in each of them.
+- The same rule and data element pair may only be listed once.
+
+The workbench evaluates the mapped rules in batches of up to 50 rules per
+request. This requires a DHIS2 version whose validation analysis API supports
+selecting individual rules (the ``vr`` parameter). On a server without this
+support the stage fails with an error rather than storing incorrect counts.
+
+If any analysis request of a stage fails, or returns as many results as
+``max_results`` allows (so results may be missing), the stage still stores the
+counts it found but does not delete any existing values in that run.

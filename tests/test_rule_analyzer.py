@@ -106,3 +106,44 @@ def test_config_accepts_aggregation_level_at_or_below_query_level():
 def test_config_rejects_aggregation_level_above_query_level_or_not_int(bad):
     with pytest.raises(ValueError, match='aggregation_level'):
         _config_manager()._validate_stage_params(_vr_stage(aggregation_level=bad))
+
+
+MAPPING = {'validation_rule': 'rule0000001', 'data_element': DE}
+
+
+def _mapping_stage(mappings, **params):
+    return {'name': 'per rule', 'type': 'validation_rules',
+            'params': {'rule_mappings': mappings, 'level': 2, 'duration': '3 years', **params}}
+
+
+def test_config_accepts_rule_mappings_including_many_to_one_and_one_to_many():
+    _config_manager()._validate_stage_params(_mapping_stage([
+        {'validation_rule': 'rule0000001', 'data_element': 'de000000001'},
+        {'validation_rule': 'rule0000002', 'data_element': 'de000000001'},
+        {'validation_rule': 'rule0000001', 'data_element': 'de000000002'},
+    ]))
+
+
+@pytest.mark.parametrize('extra', [{'validation_rule_group': 'vrg00000001'}, {'destination_data_element': DE}])
+def test_config_rejects_rule_mappings_combined_with_group_form(extra):
+    with pytest.raises(ValueError, match='rule_mappings'):
+        _config_manager()._validate_stage_params(_mapping_stage([MAPPING], **extra))
+
+
+@pytest.mark.parametrize('mappings', [[], 'rule0000001', [{'validation_rule': 'rule0000001'}],
+                                      [{'validation_rule': '', 'data_element': DE}], ['rule0000001']])
+def test_config_rejects_empty_or_malformed_rule_mappings(mappings):
+    with pytest.raises(ValueError, match='rule_mappings'):
+        _config_manager()._validate_stage_params(_mapping_stage(mappings))
+
+
+def test_config_rejects_duplicate_rule_mapping_pairs():
+    with pytest.raises(ValueError, match='duplicate'):
+        _config_manager()._validate_stage_params(_mapping_stage([MAPPING, dict(MAPPING)]))
+
+
+def test_config_still_requires_group_and_data_element_without_rule_mappings():
+    stage = _vr_stage()
+    del stage['params']['destination_data_element']
+    with pytest.raises(ValueError, match='destination_data_element'):
+        _config_manager()._validate_stage_params(stage)
