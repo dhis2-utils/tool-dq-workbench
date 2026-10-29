@@ -1,6 +1,7 @@
 {% extends "layout.html" %}
 
 {% block content %}
+{% include "partials/_flashes.html" %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h4 mb-0">Data Quality Monitor</h1>
     <form id="runForm" action="{{ url_for('api.run') }}" method="post">
