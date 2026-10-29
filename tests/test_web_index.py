@@ -175,3 +175,50 @@ def test_validation_stage_form_saves_and_clears_aggregation_level(client_populat
     with open(populated_config) as f:
         params = yaml.safe_load(f)['analyzer_stages'][0]['params']
     assert 'aggregation_level' not in params
+
+
+@pytest.fixture
+def mapping_config(tmp_path, monkeypatch):
+    """A config with one validation rule stage that uses rule_mappings."""
+    from app.core.config_loader import ConfigManager
+    monkeypatch.setattr(ConfigManager, '_validate_api_token', staticmethod(lambda base_url, d2_token: None))
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(yaml.dump({
+        'server': {
+            'base_url': 'https://dhis2.example.org',
+            'd2_token': 'fake-token',
+            'logging_level': 'INFO',
+            'max_concurrent_requests': 5,
+            'max_results': 500,
+        },
+        'analyzer_stages': [{
+            'name': 'Per rule',
+            'type': 'validation_rules',
+            'active': True,
+            'params': {'level': 2, 'duration': '12 months',
+                       'rule_mappings': [{'validation_rule': 'rule0000001', 'data_element': 'de000000001'}]},
+        }],
+    }))
+    return str(cfg)
+
+
+def _client_for(config_path):
+    app = create_app(config_path, skip_validation=True)
+    app.config['TESTING'] = True
+    return app.test_client()
+
+
+@pytest.mark.parametrize('method', ['get', 'post'])
+def test_edit_route_redirects_for_rule_mapping_stage(mapping_config, method):
+    before = open(mapping_config).read()
+    with _client_for(mapping_config) as client:
+        resp = getattr(client, method)('/api/validation-rule-stage/0', follow_redirects=True)
+    assert b'rule mappings' in resp.data
+    assert open(mapping_config).read() == before
+
+
+def test_index_lists_rule_mapping_stage(mapping_config):
+    with _client_for(mapping_config) as client:
+        resp = client.get('/')
+    assert resp.status_code == 200
+    assert b'Per rule' in resp.data
