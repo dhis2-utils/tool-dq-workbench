@@ -170,12 +170,14 @@ class ValidationRuleAnalyzer(StageAnalyzer):
             return e
 
         if not isinstance(response_data, list):
-            logging.warning(f"Expected list from DHIS2 validation API but got {type(response_data)}: {response_data}")
-            return []
+            return RuntimeError(
+                f"Expected list from DHIS2 validation API for ou '{ou}' but got {type(response_data).__name__}")
 
         if vr is not None:
             # A server without 'vr' support ignores it and evaluates every rule in the system
-            unexpected = {row.get('validationRuleId') for row in response_data} - set(vr)
+            # Rows without a rule id are malformed and skipped when counting
+            unexpected = {row.get('validationRuleId') for row in response_data
+                          if isinstance(row, dict) and row.get('validationRuleId')} - set(vr)
             if unexpected:
                 return RuntimeError(
                     f"Server returned results for rules not requested ({len(unexpected)} rules) for ou '{ou}' — "

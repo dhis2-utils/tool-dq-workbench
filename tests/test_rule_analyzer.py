@@ -343,3 +343,69 @@ def test_run_stage_deletes_vanished_values_when_complete():
 
     assert [(dv['dataElement'], dv['orgUnit']) for dv in result['deletions']] == [('deA', 'ou2')]
     assert result['errors'] == []
+
+
+def test_fetch_skips_rows_without_rule_id_instead_of_failing_the_batch():
+    session = _FakeSession(lambda body: (200, [_row('r1', 'ou1', 'p1'), {'organisationUnitId': 'ou1', 'periodId': 'p1'}]))
+    rows = _run_fetch(session, vr=['r1'])
+    assert not isinstance(rows, Exception)
+    values = _analyzer().count_mapped_violations(rows, [{'validation_rule': 'r1', 'data_element': 'deA'}])
+    assert [(v['dataElement'], v['value']) for v in values] == [('deA', '1')]
+
+
+def test_run_stage_treats_non_list_response_as_incomplete():
+    def responder(body):
+        return (200, {'unexpected': 'shape'}) if body['ou'] == 'ou2' else (200, [_row('rule0000000', 'ou1', 'p1')])
+
+    result, _ = _run_stage(_rules_stage(1), responder, existing=[_existing('deA', 'ou2', 'p1', 3)])
+
+    assert result['deletions'] == []
+    assert any('Skipped deletions' in e for e in result['errors'])
+
+
+def test_run_stage_group_form_skips_deletions_when_an_org_unit_request_fails():
+    def responder(body):
+        return (500, {'message': 'boom'}) if body['ou'] == 'ou2' else (200, [_row('r1', 'ou1', 'p1')])
+
+    result, _ = _run_stage(_vr_stage(), responder, existing=[_existing(DE, 'ou2', 'p1', 4)])
+
+    assert result['deletions'] == []
+    assert any('Skipped deletions' in e for e in result['errors'])
+    assert [(dv['orgUnit'], dv['value']) for dv in result['dataValues']] == [('ou1', '1')]
+
+
+def test_run_stage_unsupported_server_writes_nothing_and_keeps_existing_values():
+    result, _ = _run_stage(_rules_stage(1), lambda body: (200, [_row('someOtherRule', body['ou'], 'p1')]),
+                           existing=[_existing('deA', 'ou1', 'p1', 2)])
+
+    assert result['dataValues'] == [] and result['deletions'] == []
+    assert any("does not support 'vr'" in e for e in result['errors'])
+
+
+def test_run_stage_all_batches_failing_yields_no_values_and_lists_errors():
+    result, session = _run_stage(_rules_stage(60), lambda body: (404, {'message': 'not found'}),
+                                 existing=[_existing('deA', 'ou1', 'p1', 2)])
+
+    assert len(session.bodies) == 4
+    assert result['dataValues'] == [] and result['deletions'] == []
+    assert sum('404' in e for e in result['errors']) == 4
+
+
+def test_run_stage_mapping_form_rolls_up_per_data_element():
+    analyzer_paths = {'school00001': PATHS['school00001'], 'school00002': PATHS['school00002']}
+
+    def responder(body):
+        return 200, [_row('rule0000000', 'school00001', 'p1'), _row('rule0000001', 'school00002', 'p1')]
+
+    stage = _rules_stage(2, data_elements=('deA', 'deB'), aggregation_level=3)
+    analyzer = _analyzer()
+    analyzer.get_organisation_units_at_level = AsyncMock(return_value=['ou1'])
+    analyzer.fetch_existing_datvalues = AsyncMock(return_value=[])
+    analyzer.fetch_org_unit_paths = AsyncMock(return_value=analyzer_paths)
+
+    async def run():
+        return await analyzer.run_stage(stage, _FakeSession(responder), asyncio.Semaphore(5))
+    result = asyncio.run(run())
+
+    assert sorted((dv['dataElement'], dv['orgUnit'], dv['value']) for dv in result['dataValues']) == [
+        ('deA', 'lga00000001', '1'), ('deB', 'lga00000001', '1')]
