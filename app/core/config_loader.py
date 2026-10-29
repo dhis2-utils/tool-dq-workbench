@@ -137,6 +137,7 @@ class ConfigManager:
         stage_type = stage['type']
         if stage_type == 'validation_rules':
             required = ['validation_rule_group', 'destination_data_element', 'level', 'duration']
+            self._validate_aggregation_level(stage)
         elif stage_type == 'outlier':
             required = ['dataset', 'algorithm', 'destination_data_element', 'level', 'duration']
             self._validate_outlier_start_end_dates(stage)
@@ -149,6 +150,22 @@ class ConfigManager:
         for param in required:
             if param not in params:
                 raise ValueError(f"Missing parameter '{param}' in stage '{stage['name']}' of type '{stage_type}'")
+
+    @staticmethod
+    def _validate_aggregation_level(stage):
+        params = stage['params']
+        aggregation_level = params.get('aggregation_level')
+        if aggregation_level is None:
+            return
+        # Existing values are looked up as descendants of the org units at 'level', so results must not
+        # be rolled up above that level or stale values would never be found and deleted.
+        level = params.get('level')
+        if (not isinstance(aggregation_level, int) or isinstance(aggregation_level, bool)
+                or not isinstance(level, int) or aggregation_level < level):
+            raise ValueError(
+                f"Invalid aggregation_level '{aggregation_level}' in stage '{stage['name']}': "
+                f"must be an integer greater than or equal to level ({level})"
+            )
 
     @staticmethod
     def _validate_stage(stage):

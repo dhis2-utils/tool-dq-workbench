@@ -152,3 +152,26 @@ def test_edit_server_resilient_to_unparseable_config(tmp_path):
         response = client.get('/api/edit-server')
     assert response.status_code == 200
     assert b'Edit Server Configuration' in response.data
+
+
+def _post_validation_stage(client, url, **extra):
+    form = {
+        'stage_name': 'Plausibility', 'orgunit_level': '2', 'duration': '3 years',
+        'validation_rule_group': 'vrg00000001', 'destination_data_element': 'deUID000001',
+        'active': 'on', **extra,
+    }
+    return client.post(url, data=form)
+
+
+def test_validation_stage_form_saves_and_clears_aggregation_level(client_populated, populated_config, monkeypatch):
+    from app.core.config_loader import ConfigManager
+    monkeypatch.setattr(ConfigManager, '_validate_api_token', staticmethod(lambda base_url, token: None))
+    _post_validation_stage(client_populated, '/api/validation-rule-stage', aggregation_level='3')
+    with open(populated_config) as f:
+        params = yaml.safe_load(f)['analyzer_stages'][0]['params']
+    assert params['aggregation_level'] == 3
+
+    _post_validation_stage(client_populated, '/api/validation-rule-stage/0', aggregation_level='')
+    with open(populated_config) as f:
+        params = yaml.safe_load(f)['analyzer_stages'][0]['params']
+    assert 'aggregation_level' not in params
