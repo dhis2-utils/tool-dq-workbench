@@ -14,7 +14,7 @@ Files:
 |---|---|
 | `install.sh` | Installs or updates the tool at a git ref, creates the service user, venv, config/log dirs and enables the timer |
 | `dq-workbench.service` | One-shot run of `dq_monitor.py --config /etc/dq-workbench/config.yml` as user `dqworkbench` |
-| `dq-workbench.timer` | Daily at 01:30 Asia/Yangon, catches up a missed run after a reboot |
+| `dq-workbench.timer` | Daily at 23:00 Asia/Yangon (before the 01:00 full analytics refresh), catches up a missed run after a reboot |
 
 ## 1. Create the container (on the LXD host)
 
@@ -83,7 +83,7 @@ lxc exec dqworkbench -- systemctl list-timers dq-workbench.timer
 ## Operating
 
 - **Change the time:** edit `OnCalendar` in `/etc/systemd/system/dq-workbench.timer`, then
-  `systemctl daemon-reload`. Keep it before the nightly analytics table generation and clear of the
+  `systemctl daemon-reload && systemctl restart dq-workbench.timer`. Keep it before the nightly analytics table generation and clear of the
   scheduled DATA_INTEGRITY job and backups.
 - **Update the tool:** `bash /opt/dq-workbench/deploy/install.sh <ref>`. The config is left alone.
 - **Did last night's run work?** `systemctl status dq-workbench.service` (exit status) and

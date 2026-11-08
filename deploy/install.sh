@@ -56,7 +56,9 @@ echo "== systemd units"
 install -m 644 "$APP_DIR/deploy/dq-workbench.service" /etc/systemd/system/dq-workbench.service
 install -m 644 "$APP_DIR/deploy/dq-workbench.timer" /etc/systemd/system/dq-workbench.timer
 systemctl daemon-reload
-systemctl enable --now dq-workbench.timer
+systemctl enable dq-workbench.timer
+# Restart so a changed OnCalendar takes effect immediately
+systemctl restart dq-workbench.timer
 systemctl list-timers dq-workbench.timer --no-pager
 
 echo "Done. Run once now with: systemctl start dq-workbench.service && journalctl -u dq-workbench -f"

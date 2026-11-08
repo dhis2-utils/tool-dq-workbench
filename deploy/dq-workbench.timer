@@ -2,9 +2,9 @@
 Description=Run DQ Workbench once a day
 
 [Timer]
-# Local time on the DHIS2 server. Pick a slot before the nightly analytics table
-# generation so dashboards pick up the new values, and clear of backups.
-OnCalendar=*-*-* 01:30:00 Asia/Yangon
+# Myanmar time. Runs before the nightly full analytics refresh (01:00) so dashboards
+# pick up the new values; a run takes about a minute.
+OnCalendar=*-*-* 23:00:00 Asia/Yangon
 # Run a missed slot (e.g. container was down) at the next boot
 Persistent=true
 Unit=dq-workbench.service
