@@ -128,7 +128,10 @@ def _build_de_payload(check):
         "code": f"MI_{code}",
         "valueType": "INTEGER",
         "domainType": "AGGREGATE",
-        "aggregationType": "LAST",
+        # LAST would carry an earlier month's count forward whenever a period has no row in the analytics
+        # tables, and DHIS2 leaves zeros out of them unless keyIncludeZeroValuesInAnalytics is on. A check
+        # that drops to 0 would then keep showing its old count. LAST_IN_PERIOD never looks back.
+        "aggregationType": "LAST_IN_PERIOD",
         "zeroIsSignificant": True,
     }
 
