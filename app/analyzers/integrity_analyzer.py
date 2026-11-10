@@ -184,6 +184,15 @@ class IntegrityCheckAnalyzer(StageAnalyzer):
             "value": str(value_int),
         }
 
+    @staticmethod
+    def _check_failed(result):
+        if not result:
+            return False
+        try:
+            return int(result.get("count")) < 0
+        except (TypeError, ValueError):
+            return False
+
     def process_results(self, results, stage):
         """Build a header-style dataValueSet payload with dataSet, period, and orgUnit at the top level.
 
@@ -204,6 +213,11 @@ class IntegrityCheckAnalyzer(StageAnalyzer):
         for check_code, data_element in data_element_map.items():
             de_id = data_element.get('id')
             api_result = results_by_code.get(check_code)
+            if self._check_failed(api_result):
+                # DHIS2 reports a check that threw as count -1; keep the last good value rather than zero it
+                logging.error(f"Integrity check '{check_code}' failed on the server, skipping DE {de_id}: "
+                              f"{api_result.get('error') or 'no error message'}")
+                continue
             data_value = self.transform_integrity_check_to_data_value(api_result, de_id)
             if data_value is None:
                 # API returned null/missing — explicitly zero out to avoid stale values

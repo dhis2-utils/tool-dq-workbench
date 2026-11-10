@@ -22,6 +22,10 @@ def validation_rule_stage_view(stage_index=None):
         if stage.get('type') != 'validation_rules':
             flash('Only validation rule stages can be edited here.', 'danger')
             return redirect(url_for('ui.index'))
+        if 'rule_mappings' in stage['params']:
+            flash('This stage uses rule mappings and can only be edited in the configuration file for now.',
+                  'warning')
+            return redirect(url_for('ui.index'))
     else:
         stage = {
             'name': '',

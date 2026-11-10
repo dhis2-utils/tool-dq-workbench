@@ -1,0 +1,28 @@
+[Unit]
+Description=DQ Workbench daily data quality run
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=dqworkbench
+Group=dqworkbench
+WorkingDirectory=/opt/dq-workbench
+ExecStart=/opt/dq-workbench/.venv/bin/python /opt/dq-workbench/dq_monitor.py --config /etc/dq-workbench/config.yml
+# A full run (validation, outlier and integrity stages) should finish well within this
+TimeoutStartSec=3h
+Nice=10
+
+# Hardening: the tool only talks HTTP to DHIS2 and writes its log
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/dq-workbench
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

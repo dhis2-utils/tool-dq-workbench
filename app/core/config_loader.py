@@ -136,7 +136,11 @@ class ConfigManager:
         params = stage['params']
         stage_type = stage['type']
         if stage_type == 'validation_rules':
-            required = ['validation_rule_group', 'destination_data_element', 'level', 'duration']
+            if 'rule_mappings' in params:
+                self._validate_rule_mappings(stage)
+                required = ['level', 'duration']
+            else:
+                required = ['validation_rule_group', 'destination_data_element', 'level', 'duration']
             self._validate_aggregation_level(stage)
         elif stage_type == 'outlier':
             required = ['dataset', 'algorithm', 'destination_data_element', 'level', 'duration']
@@ -150,6 +154,34 @@ class ConfigManager:
         for param in required:
             if param not in params:
                 raise ValueError(f"Missing parameter '{param}' in stage '{stage['name']}' of type '{stage_type}'")
+
+    @staticmethod
+    def _validate_rule_mappings(stage):
+        params = stage['params']
+        name = stage['name']
+        if 'validation_rule_group' in params or 'destination_data_element' in params:
+            raise ValueError(
+                f"Stage '{name}': rule_mappings cannot be combined with "
+                f"validation_rule_group/destination_data_element"
+            )
+        mappings = params['rule_mappings']
+        if not isinstance(mappings, list) or not mappings:
+            raise ValueError(f"Stage '{name}': rule_mappings must be a non-empty list")
+        pairs = set()
+        for mapping in mappings:
+            if not isinstance(mapping, dict) or not all(
+                    isinstance(mapping.get(key), str) and mapping.get(key)
+                    for key in ('validation_rule', 'data_element')):
+                raise ValueError(
+                    f"Stage '{name}': each entry in rule_mappings needs a validation_rule and a data_element, "
+                    f"got {mapping!r}"
+                )
+            pair = (mapping['validation_rule'], mapping['data_element'])
+            if pair in pairs:
+                raise ValueError(
+                    f"Stage '{name}': duplicate rule mapping {pair[0]} -> {pair[1]} would be counted twice"
+                )
+            pairs.add(pair)
 
     @staticmethod
     def _validate_aggregation_level(stage):

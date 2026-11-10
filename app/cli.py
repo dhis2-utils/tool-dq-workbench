@@ -211,7 +211,20 @@ def run_main():
         config.setdefault('server', {})['log_file'] = args.log_file
 
     monitor = DataQualityMonitor(config)
-    asyncio.run(monitor.run_all_stages())
+    result = asyncio.run(monitor.run_all_stages())
+    sys.exit(exit_status(result))
+
+
+def exit_status(result):
+    """Exit code for a CLI run: 1 if any stage reported errors or an import was not OK, so schedulers see it."""
+    if result.get('errors'):
+        logging.error(f"Run finished with {len(result['errors'])} error(s)")
+        return 1
+    status = (result.get('import_summary') or {}).get('status', 'OK')
+    if status != 'OK':
+        logging.error(f"Run finished with import status {status}")
+        return 1
+    return 0
 
 if __name__ == '__main__':
     run_main()
